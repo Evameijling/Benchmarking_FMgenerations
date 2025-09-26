@@ -52,6 +52,8 @@ class BandStacker:
             self._stack_s1(max_files)
         elif self.modality == "S2L2A":
             self._stack_s2(max_files)
+        elif self.modality == "LULC":
+            self._process_lulc(max_files)
 
     def _stack_s1(self, max_files=None):
         # S1RTC doesn't need resampling - just stack VV and VH
@@ -160,6 +162,66 @@ class BandStacker:
             with rasterio.open(output_path, 'w', **meta) as dst:
                 dst.write(stack)
                 dst.update_tags(SOURCE=str(folder.relative_to(self.input_root.parent.parent)))
-
+    
+    def _process_lulc(self, max_files=None):
+        """Process LULC files - copy to input folder with optional resampling"""
+        print(f"Looking for LULC data in: {self.input_root}")
+        
+        # Look for LULC files 
+        lulc_patterns = ["*.tif"]
+        lulc_paths = []
+        
+        for pattern in lulc_patterns:
+            lulc_paths.extend(list(self.input_root.rglob(pattern)))
+        
+        # Remove duplicates and filter for actual files
+        lulc_paths = list(set([p for p in lulc_paths if p.is_file()]))
+        
+        print(f"Found {len(lulc_paths)} LULC files")
+        
+        if max_files is not None:
+            lulc_paths = lulc_paths[:max_files]
+            print(f"Processing first {len(lulc_paths)} files")
+        
+        if not lulc_paths:
+            print("No LULC files found! Check your data structure.")
+            print("Expected structure: Core-LULC/TILE_ID/*.tif")
+            return
+        
+        for lulc_path in tqdm(lulc_paths):
+            with rasterio.open(lulc_path) as src:
+                # Check if resampling is needed
+                pixel_size_x = abs(src.transform[0])
+                pixel_size_y = abs(src.transform[4])
+                current_resolution = min(pixel_size_x, pixel_size_y)
+                
+                if abs(current_resolution - self.target_resolution) > 0.1:  # Need resampling
+                    target_transform, target_width, target_height = self._get_target_resolution_params(lulc_path)
+                    data = self._resample_to_target_resolution(lulc_path, target_transform, target_width, target_height)
+                    
+                    meta = src.meta.copy()
+                    meta.update({
+                        'transform': target_transform,
+                        'width': target_width,
+                        'height': target_height
+                    })
+                else:  # No resampling needed
+                    data = src.read(1)
+                    meta = src.meta.copy()
+            
+            # Determine output filename based on folder structure
+            if lulc_path.parent.name == f"Core-{self.modality}":
+                # File is directly in Core-LULC folder
+                tile_name = lulc_path.stem
+            else:
+                # File is in a subfolder
+                tile_name = lulc_path.parent.name
+            
+            output_path = self.output_root / lulc_path.name
+            
+            with rasterio.open(output_path, 'w', **meta) as dst:
+                dst.write(data, 1)
+                dst.update_tags(SOURCE=str(lulc_path.relative_to(self.input_root.parent.parent)))
+        
 if __name__ == "__main__":
     BandStacker(modality="S1RTC").stack_all()

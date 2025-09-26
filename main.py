@@ -1,13 +1,13 @@
 from src.generations import TerraMindGenerator
-from src.visualizations import ComparisonVisualizer, Visualizer
+from src.visualize import ComparisonVisualizer, Visualizer
 from src.utils import BandStacker
 from pathlib import Path
 
 ROOT = Path("/home/egm/Data/Projects/CopGen") 
 
 if __name__ == "__main__":
-    input_modality = "S2L2A"   # [DEM, LULC, S1RTC, S2L2A]
-    output_modality = "S1RTC"  # [DEM, LULC, S1RTC, S2L2A]
+    input_modality = "S1RTC"   # [DEM, LULC, S1RTC, S2L2A]
+    output_modality = "LULC"  # [DEM, LULC, S1RTC, S2L2A]
     max_files = 10  # Set maximum number of files to process (None for all)
 
     # # Step 0: Stack bands if not already done 
@@ -45,10 +45,23 @@ if __name__ == "__main__":
     # )
     # visualizer.visualize(n_examples=5)  # Visualize 5 random examples
 
+    # # Visualize a single file and save
+    # InOutput = "input"  # [input, output]
+    # modality = "LULC" # [DEM, LULC, S1RTC, S2L2A]
+    # tile = "433U_334R"
+    # visualizer = Visualizer(
+    #     InOutput=InOutput,  # or "output"
+    #     modality=modality, 
+    #     tile=tile,
+    #     root=ROOT
+    # )
+    # visualizer.visualize(save=True, show=False)
+
+    
     # Visualize a single file and save
-    InOutput = "output"  # [input, output]
-    modality = "S1RTC" # [DEM, LULC, S1RTC, S2L2A]
-    tile = "433U_183R.tif"
+    InOutput = "input"  # [input, output]
+    modality = "LULC" # [DEM, LULC, S1RTC, S2L2A]
+    tile = "433U_481R"
     visualizer = Visualizer(
         InOutput=InOutput,  # or "output"
         modality=modality, 

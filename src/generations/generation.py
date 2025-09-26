@@ -76,6 +76,14 @@ class TerraMindGenerator:
             # arr = arr / 1000.0 # Rescaling DN-->reflectance for S2L2A input (0-10 range, as expected by TerraMind)
             # arr = np.clip(arr, 0.0, 1.1)  # Optional: cap reflectance ## CHECK! TODO
             pass
+        elif self.input_modality == "LULC":
+            # LULC is already in the correct format (class indices)
+            # Ensure it's float32 for model input but keep original values
+            pass
+        elif self.input_modality == "DEM":
+            # DEM preprocessing if needed
+            pass
+
         if arr.ndim == 2:
             tqdm.write(f"WARNING: {tif_path} is not a multi-band file.")
             return
@@ -113,7 +121,36 @@ class TerraMindGenerator:
             output_data = np.clip(output, 0, 10000).astype(np.uint16)
                 
             # print(f"Processed S2L2A output - min: {output_data.min()}, max: {output_data.max()}, mean: {output_data.mean():.1f}")
+        
+        elif self.output_modality == "LULC":
+            # LULC: FSQ-VAE tokenized output - already discrete tokens/class indices
+            # The model decoder reconstructs discrete token codes via tokenizer decode logic
+            # No need to round - output should already be quantized class indices
             
+            print(f"LULC output shape: {output.shape}")
+            print(f"LULC output stats - min: {output.min():.2f}, max: {output.max():.2f}, unique values: {len(np.unique(output))}")
+            
+            # Check if output is already discrete (integer-like values)
+            if np.allclose(output, np.round(output)):
+                # Output is already discrete - just convert to appropriate integer type
+                output_data = np.clip(output, 0, 255).astype(np.uint8)
+            else:
+                # If somehow continuous, we might need different handling
+                # Could try nearest neighbor to closest valid token/class
+                output_data = np.round(np.clip(output, 0, 255)).astype(np.uint8)
+            
+            output_dtype = np.uint8
+            
+            # Debug: Show class distribution
+            unique_classes, counts = np.unique(output_data, return_counts=True)
+            print(f"Generated LULC classes: {unique_classes[:10]}...")  # Show first 10
+            print(f"Most common class: {unique_classes[np.argmax(counts)]} ({counts.max()} pixels)")
+            print(f"LULC output_data shape after processing: {output_data.shape}")
+            
+        elif self.output_modality == "DEM":
+            # DEM: typically float32 for elevation values
+            output_dtype = np.float32
+            output_data = output.astype(np.float32)
         else:
             # Default: keep as float32
             output_dtype = np.float32
@@ -122,36 +159,40 @@ class TerraMindGenerator:
         # Save as GeoTIFF using input metadata with specified dtype
         with rasterio.open(tif_path) as src:
             meta = src.meta.copy()
+            
+            # Handle single-band output (DEM) vs multi-band (S1RTC, S2L2A, LULC)
+            if self.output_modality == "DEM":
+                # Single-band output
+                if output_data.ndim == 3 and output_data.shape[0] == 1:
+                    output_data = output_data.squeeze(0)  # Remove channel dimension
+                count = 1
+            else:
+                # Multi-band output (S1RTC, S2L2A, and LULC which has 10 bands)
+                count = output_data.shape[0] if output_data.ndim == 3 else 1
+                print(f"Setting count to {count} for {self.output_modality}")
+            
             # Fix nodata based on dtype
-            if output_dtype == np.uint16:
+            if output_dtype == np.uint8:
+                meta['nodata'] = 255  # Use max value for uint8
+            elif output_dtype == np.uint16:
                 meta['nodata'] = 65535  # Valid nodata for uint16
             elif output_dtype == np.float32:
                 meta['nodata'] = -9999.0  # Valid nodata for float
             else:
                 meta.pop('nodata', None)  # Remove if unsure
+                
             meta.update({
-                'count': output.shape[0], 
-                'height': output.shape[1], 
-                'width': output.shape[2],
+                'count': count, 
+                'height': output_data.shape[-2], 
+                'width': output_data.shape[-1],
                 'dtype': output_dtype
             })
-            
-            # # Fix nodata value for different data types
-            # if output_dtype == np.uint16:
-            #     meta['nodata'] = 65535  # Use max value for uint16
-            # elif output_dtype == np.float32:
-            #     meta['nodata'] = -9999.0  # Standard float nodata
-            
-            # nodata_val = meta.get("nodata", None)
-            # if nodata_val is not None:
-            #     nodata_mask = (output_data == nodata_val)
-            #     num_nodata = np.sum(nodata_mask)
-            #     print(f"Nodata value = {nodata_val} | N pixels = {num_nodata}")
-            # else:
-            #     print("No nodata value defined.")
 
             with rasterio.open(out_path, 'w', **meta) as dst:
-                dst.write(output_data)
+                if output_data.ndim == 2:
+                    dst.write(output_data, 1)  # Single band
+                else:
+                    dst.write(output_data)  # Multi-band
 
 if __name__ == "__main__":
     generator = TerraMindGenerator(

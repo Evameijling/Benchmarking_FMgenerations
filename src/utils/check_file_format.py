@@ -45,9 +45,11 @@ if __name__ == "__main__":
         # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B09.tif",
         # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B11.tif",
         # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B12.tif",
-        "/home/egm/Data/Projects/CopGen/data/input/S1RTC/433U_183R.tif",
-        "/home/egm/Data/Projects/CopGen/data/output/S1RTC/433U_183R.tif",
-        # "/home/egm/Data/Projects/CopGen/data/input/S2L2A/433U_183R.tif"
+        # "/home/egm/Data/Projects/CopGen/data/input/S1RTC/433U_183R.tif",
+        # "/home/egm/Data/Projects/CopGen/data/output/S1RTC/433U_183R.tif",
+        # "/home/egm/Data/Projects/CopGen/data/input/S2L2A/433U_183R.tif",
+        "/home/egm/Data/Projects/CopGen/data/input/LULC/92U_5R_2020.tif",
+        "/home/egm/Data/Projects/CopGen/data/output/LULC/433U_183R.tif"
     ]
     
     for file_path in files_to_check:
