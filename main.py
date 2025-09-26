@@ -46,11 +46,13 @@ if __name__ == "__main__":
     # visualizer.visualize(n_examples=5)  # Visualize 5 random examples
 
     # Visualize a single file and save
-    input_modality = "S2L2A"
-    tif_file = Path("/home/egm/Data/Projects/CopGen/data/input") / input_modality / "433U_183R.tif"
-
+    InOutput = "output"  # [input, output]
+    modality = "S1RTC" # [DEM, LULC, S1RTC, S2L2A]
+    tile = "433U_183R.tif"
     visualizer = Visualizer(
-        tif_path=tif_file,
-        modality=input_modality
+        InOutput=InOutput,  # or "output"
+        modality=modality, 
+        tile=tile,
+        root=ROOT
     )
     visualizer.visualize(save=True, show=False)

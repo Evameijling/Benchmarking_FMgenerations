@@ -17,7 +17,7 @@ class TerraMindGenerator:
         crop_size=(256, 256),
         device=None,
         model_name="terramind_v1_base_generate",
-        timesteps=10,
+        timesteps=50,
         standardize=True,
         pretrained=True,
     ):
@@ -65,6 +65,17 @@ class TerraMindGenerator:
 
     def process_file(self, tif_path):
         arr = rxr.open_rasterio(tif_path).squeeze().values  # shape: [C, H, W]
+        arr = arr.astype(np.float32)
+        if self.input_modality == "S1RTC":
+            # Convert from linear power to dB safely
+            epsilon = 1e-8
+            arr = 10.0 * np.log10(np.clip(arr, epsilon, None))
+            arr = np.clip(arr, -50, 10)  # Optional: match TerraMesh dB range ## CHECK! TODO
+        elif self.input_modality == "S2L2A":
+            # Convert from DN to reflectance
+            # arr = arr / 1000.0 # Rescaling DN-->reflectance for S2L2A input (0-10 range, as expected by TerraMind)
+            # arr = np.clip(arr, 0.0, 1.1)  # Optional: cap reflectance ## CHECK! TODO
+            pass
         if arr.ndim == 2:
             tqdm.write(f"WARNING: {tif_path} is not a multi-band file.")
             return
@@ -86,9 +97,10 @@ class TerraMindGenerator:
 
         # Choose dtype and process data based on output modality
         if self.output_modality == "S1RTC":
-            # S1RTC: float32 for backscatter values in dB (float16 not supported by rasterio)
+            # Convert dB back to linear power for output (to match input format and visualization)
+            output = np.clip(output, -50, 10)  # Optional: enforce valid dB range before converting
+            output_data = (10 ** (output / 10)).astype(np.float32)
             output_dtype = np.float32
-            output_data = output.astype(np.float32)
         elif self.output_modality == "S2L2A":
             # S2L2A: uint16 for reflectance values (0-10000 range)
             output_dtype = np.uint16
@@ -110,6 +122,13 @@ class TerraMindGenerator:
         # Save as GeoTIFF using input metadata with specified dtype
         with rasterio.open(tif_path) as src:
             meta = src.meta.copy()
+            # Fix nodata based on dtype
+            if output_dtype == np.uint16:
+                meta['nodata'] = 65535  # Valid nodata for uint16
+            elif output_dtype == np.float32:
+                meta['nodata'] = -9999.0  # Valid nodata for float
+            else:
+                meta.pop('nodata', None)  # Remove if unsure
             meta.update({
                 'count': output.shape[0], 
                 'height': output.shape[1], 
@@ -123,6 +142,14 @@ class TerraMindGenerator:
             # elif output_dtype == np.float32:
             #     meta['nodata'] = -9999.0  # Standard float nodata
             
+            # nodata_val = meta.get("nodata", None)
+            # if nodata_val is not None:
+            #     nodata_mask = (output_data == nodata_val)
+            #     num_nodata = np.sum(nodata_mask)
+            #     print(f"Nodata value = {nodata_val} | N pixels = {num_nodata}")
+            # else:
+            #     print("No nodata value defined.")
+
             with rasterio.open(out_path, 'w', **meta) as dst:
                 dst.write(output_data)
 

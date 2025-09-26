@@ -11,6 +11,7 @@ def check_file_format(file_path):
     
     try:
         with rasterio.open(file_path) as src:
+            print(f"Checking file: {file_path}")
             print(f"File: {file_path.name}")
             print(f"Data type: {src.dtypes[0]}")
             print(f"Shape: {src.shape} (Height x Width)")
@@ -32,8 +33,21 @@ def check_file_format(file_path):
 if __name__ == "__main__":
     # Add your file paths here
     files_to_check = [
-        "/home/egm/Data/Projects/CopGen/data/input/S1RTC/example.tif",  # Replace with your actual path
-        "/home/egm/Data/Projects/CopGen/data/input/S2L2A/example.tif",  # Replace with your actual path
+        # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B01.tif",  
+        # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B02.tif",
+        # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B03.tif",
+        # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B04.tif",
+        # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B05.tif",
+        # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B06.tif",
+        # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B07.tif",
+        # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B08.tif",
+        # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B8A.tif",
+        # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B09.tif",
+        # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B11.tif",
+        # "/home/egm/Data/Projects/CopGen/data/cop-gen-small-test/Core-S2L2A/433U/433U_310R/S2B_MSIL2A_20200629T081609_N0500_R121_T36SYJ_20230505T211303/B12.tif",
+        "/home/egm/Data/Projects/CopGen/data/input/S1RTC/433U_183R.tif",
+        "/home/egm/Data/Projects/CopGen/data/output/S1RTC/433U_183R.tif",
+        # "/home/egm/Data/Projects/CopGen/data/input/S2L2A/433U_183R.tif"
     ]
     
     for file_path in files_to_check:
