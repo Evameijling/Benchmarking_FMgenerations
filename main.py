@@ -8,13 +8,13 @@ import numpy as np
 ROOT = Path("/home/egm/Data/Projects/CopGen") 
 
 if __name__ == "__main__":
-    # SEED = 42  # You can change this to any number you like
-    # random.seed(SEED)
-    # np.random.seed(SEED)
-    # print(f"Set random seed to {SEED} for reproducible file selection")
+    SEED = 42  # You can change this to any number you like
+    random.seed(SEED)
+    np.random.seed(SEED)
+    print(f"Set random seed to {SEED} for reproducible file selection")
 
-    input_modality = "LULC"   # [DEM, LULC, S1RTC, S2L2A]
-    output_modality = "S1RTC"  # [DEM, LULC, S1RTC, S2L2A]
+    input_modality = "S1RTC"   # [DEM, LULC, S1RTC, S2L2A]
+    output_modality = "LULC"  # [DEM, LULC, S1RTC, S2L2A]
     max_files = 30  # Set maximum number of files to process (None for all)
 
     # Step 0: Stack bands if not already done 
