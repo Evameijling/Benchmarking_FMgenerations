@@ -44,24 +44,11 @@ if __name__ == "__main__":
     #     root=ROOT
     # )
     # visualizer.visualize(n_examples=5)  # Visualize 5 random examples
-
-    # # Visualize a single file and save
-    # InOutput = "input"  # [input, output]
-    # modality = "LULC" # [DEM, LULC, S1RTC, S2L2A]
-    # tile = "433U_334R"
-    # visualizer = Visualizer(
-    #     InOutput=InOutput,  # or "output"
-    #     modality=modality, 
-    #     tile=tile,
-    #     root=ROOT
-    # )
-    # visualizer.visualize(save=True, show=False)
-
     
     # Visualize a single file and save
-    InOutput = "input"  # [input, output]
-    modality = "LULC" # [DEM, LULC, S1RTC, S2L2A]
-    tile = "433U_481R"
+    InOutput = "output"  # [input, output]
+    modality = "LULC_from_S1RTC" # [DEM, LULC, S1RTC, S2L2A]
+    tile = "433U_1061L"
     visualizer = Visualizer(
         InOutput=InOutput,  # or "output"
         modality=modality, 

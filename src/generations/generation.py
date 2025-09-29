@@ -25,7 +25,7 @@ class TerraMindGenerator:
         self.input_modality = input_modality
         self.output_modality = output_modality
         self.input_dir = self.root / "data" / "input" / input_modality
-        self.output_dir = self.root / "data" / "output" / output_modality
+        self.output_dir = self.root / "data" / "output" / f'{output_modality}_from_{input_modality}'
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.crop_size = crop_size
         self.timesteps = timesteps
@@ -64,6 +64,9 @@ class TerraMindGenerator:
             self.process_file(tif_path)
 
     def process_file(self, tif_path):
+        if self.device == 'cuda':
+            torch.cuda.empty_cache()
+
         arr = rxr.open_rasterio(tif_path).squeeze().values  # shape: [C, H, W]
         arr = arr.astype(np.float32)
         if self.input_modality == "S1RTC":
@@ -77,21 +80,40 @@ class TerraMindGenerator:
             # arr = np.clip(arr, 0.0, 1.1)  # Optional: cap reflectance ## CHECK! TODO
             pass
         elif self.input_modality == "LULC":
-            # LULC is already in the correct format (class indices)
-            # Ensure it's float32 for model input but keep original values
+            # LULC preprocessing - check if we need to expand dimensions
+            print(f"LULC input stats - min: {arr.min()}, max: {arr.max()}, unique: {len(np.unique(arr))}")
+            
+            # Check if LULC tokenizer expects multi-channel input (like the 10-channel output we saw)
+            if arr.ndim == 2:
+                # Try expanding to match the expected LULC format
+                # Based on the 10-channel output, the tokenizer might expect 10-channel input
+                print("LULC input is single-channel, may need to expand dimensions")
+                # For now, let's try with single channel and see the error details
+                pass
             pass
         elif self.input_modality == "DEM":
             # DEM preprocessing if needed
             pass
 
+        # Handle single-band files (expected for LULC and DEM)
         if arr.ndim == 2:
-            tqdm.write(f"WARNING: {tif_path} is not a multi-band file.")
-            return
-        img_tensor = torch.tensor(arr).float().unsqueeze(0).to(self.device)  # [1, C, H, W]
+            if self.input_modality in ["LULC", "DEM"]:
+                # Single-band is expected - add channel dimension
+                arr = arr[None, ...]  # Add channel dimension: [H, W] -> [1, H, W]
+                print(f"Added channel dimension: {arr.shape}")
+            else:
+                tqdm.write(f"WARNING: {tif_path} is not a multi-band file.")
+                return
 
+        img_tensor = torch.tensor(arr).float().unsqueeze(0).to(self.device)  # [1, C, H, W]
+        print(f"Tensor shape before crop: {img_tensor.shape}")
+        
         # Center crop
         crop = T.CenterCrop(self.crop_size)
         img_tensor_cropped = crop(img_tensor)
+        
+        print(f"Final tensor shape: {img_tensor_cropped.shape}")
+        print(f"Tensor stats - min: {img_tensor_cropped.min():.3f}, max: {img_tensor_cropped.max():.3f}")
 
         # Inference
         with torch.no_grad():

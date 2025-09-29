@@ -33,7 +33,7 @@ class ComparisonVisualizer:
         self.input_modality = input_modality
         self.output_modality = output_modality
         self.input_dir = self.root / "data" / "input" / input_modality
-        self.output_dir = self.root / "data" / "output" / output_modality
+        self.output_dir = self.root / "data" / "output" / f'{output_modality}_from_{input_modality}'
         self.vis_dir = self.root / "visualizations" / "comparisons" / f"{input_modality}_to_{output_modality}"
         self.vis_dir.mkdir(parents=True, exist_ok=True)
 
