@@ -80,17 +80,40 @@ class TerraMindGenerator:
             # arr = np.clip(arr, 0.0, 1.1)  # Optional: cap reflectance ## CHECK! TODO
             pass
         elif self.input_modality == "LULC":
-            # LULC preprocessing - check if we need to expand dimensions
+            # LULC preprocessing - ensure class indices are in 0-9 range
             print(f"LULC input stats - min: {arr.min()}, max: {arr.max()}, unique: {len(np.unique(arr))}")
             
-            # Check if LULC tokenizer expects multi-channel input (like the 10-channel output we saw)
             if arr.ndim == 2:
-                # Try expanding to match the expected LULC format
-                # Based on the 10-channel output, the tokenizer might expect 10-channel input
-                print("LULC input is single-channel, may need to expand dimensions")
-                # For now, let's try with single channel and see the error details
-                pass
-            pass
+                print("LULC input is single-channel, normalizing class indices to 0-9 range")
+                
+                # Get unique classes and map them to 0-9
+                unique_classes = sorted(np.unique(arr))
+                print(f"Original classes: {unique_classes}")
+                
+                # Create a mapping to 0-9 range
+                normalized_arr = np.zeros_like(arr, dtype=np.float32)
+                for i, cls in enumerate(unique_classes[:10]):  # Only take first 10 classes
+                    normalized_arr[arr == cls] = float(i)
+                
+                arr = normalized_arr[None, ...]  # Add channel dimension
+                print(f"Normalized to 0-9 range: {arr.shape}, values: {np.unique(arr)}")
+                
+                # Check if tokenizer expects more channels
+                temp_tensor = torch.tensor(arr).float().unsqueeze(0).to(self.device)
+                
+                if hasattr(self.model, 'tokenizer') and self.input_modality in self.model.tokenizer:
+                    tokenizer = self.model.tokenizer[self.input_modality]
+                    if hasattr(tokenizer, 'encoder') and hasattr(tokenizer.encoder, 'proj'):
+                        expected_channels = tokenizer.encoder.proj.in_channels
+                        print(f"LULC tokenizer expects {expected_channels} input channels, got {temp_tensor.shape[1]}")
+                        
+                        if expected_channels == 10:
+                            # Convert to one-hot encoding
+                            one_hot = torch.zeros(1, 10, arr.shape[1], arr.shape[2], device=self.device)
+                            class_indices = temp_tensor.long()
+                            one_hot.scatter_(1, class_indices, 1.0)
+                            arr = one_hot.squeeze(0).cpu().numpy()  # [10, H, W]
+                            print(f"Converted to one-hot encoding: {arr.shape}")
         elif self.input_modality == "DEM":
             # DEM preprocessing if needed
             pass
