@@ -11,7 +11,7 @@ from tqdm import tqdm
 class TerraMindGenerator:
     def __init__(
         self,
-        input_modality="S1RTC",
+        input_modalities=["S1RTC"],
         output_modality="S2L2A",
         root=None,
         crop_size=(256, 256),
@@ -22,10 +22,10 @@ class TerraMindGenerator:
         pretrained=True,
     ):
         self.root = Path(root)
-        self.input_modality = input_modality
+        self.input_modalities = input_modalities
         self.output_modality = output_modality
-        self.input_dir = self.root / "data" / "input" / input_modality
-        self.output_dir = self.root / "data" / "output" / f'{output_modality}_from_{input_modality}'
+        self.input_dirs = {mod: self.root / "data" / "input" / mod for mod in input_modalities}
+        self.output_dir = self.root / "data" / "output" / f'{output_modality}_from_{"_".join(input_modalities)}'
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.crop_size = crop_size
         self.timesteps = timesteps
@@ -42,206 +42,181 @@ class TerraMindGenerator:
 
         self.model = FULL_MODEL_REGISTRY.build(
             model_name,
-            modalities=[self.input_modality],
+            modalities=self.input_modalities,
             output_modalities=[self.output_modality],
             pretrained=pretrained,
             standardize=standardize,
         )
         self.model = self.model.to(self.device).eval()
 
+    def extract_base_name(self, filename):
+        """Extract base tile name, removing year suffixes"""
+        base = filename
+        if '_20' in base:  # Remove _2020, _2021, etc.
+            base = base.split('_20')[0]
+        return base
+
+    def find_matching_file(self, modality, base_tile_name):
+        """Find file in modality directory that matches the base tile name"""
+        possible_patterns = [
+            f"{base_tile_name}.tif",
+            f"{base_tile_name}_*.tif",  # For files with suffixes like _2020
+        ]
+        
+        for pattern in possible_patterns:
+            matches = list(self.input_dirs[modality].glob(pattern))
+            if matches:
+                return matches[0]  # Return first match
+        
+        raise FileNotFoundError(f"No matching file found for {base_tile_name} in {modality}")
+
+    def load_and_preprocess(self, modality, reference_tif_path):
+        # Extract base name from reference file
+        base_name = self.extract_base_name(reference_tif_path.stem)
+        
+        # Find matching file in this modality
+        actual_file = self.find_matching_file(modality, base_name)
+        print(f"Loading {modality}: {actual_file.name} (base: {base_name})")
+        
+        arr = rxr.open_rasterio(actual_file).squeeze().values.astype(np.float32)
+
+        # ... rest of existing preprocessing logic stays the same ...
+        if modality == "S1RTC":
+            epsilon = 1e-8
+            arr = 10.0 * np.log10(np.clip(arr, epsilon, None))
+            arr = np.clip(arr, -50, 10)
+        elif modality == "LULC":
+            if arr.ndim == 2:
+                unique_classes = sorted(np.unique(arr))
+                normalized_arr = np.zeros_like(arr, dtype=np.float32)
+                for i, cls in enumerate(unique_classes[:10]):
+                    normalized_arr[arr == cls] = float(i)
+                arr = normalized_arr[None, ...]
+                temp_tensor = torch.tensor(arr).float().unsqueeze(0).to(self.device)
+                if hasattr(self.model, 'tokenizer') and modality in self.model.tokenizer:
+                    tokenizer = self.model.tokenizer[modality]
+                    if hasattr(tokenizer, 'encoder') and hasattr(tokenizer.encoder, 'proj'):
+                        expected_channels = tokenizer.encoder.proj.in_channels
+                        if expected_channels == 10:
+                            one_hot = torch.zeros(1, 10, arr.shape[1], arr.shape[2], device=self.device)
+                            class_indices = temp_tensor.long()
+                            one_hot.scatter_(1, class_indices, 1.0)
+                            arr = one_hot.squeeze(0).cpu().numpy()
+        elif modality in ["DEM"] and arr.ndim == 2:
+            arr = arr[None, ...]
+
+        return arr
+
     def process_all(self, max_files=None):
-        """Process all files in the input directory"""
-        # Get all .tif files
-        tif_files = list(self.input_dir.glob("*.tif"))
-        
-        # Limit number of files if specified
-        if max_files is not None:
-            tif_files = tif_files[:max_files]
-        
-        print(f"Found {len(tif_files)} files to process")
-        
-        for tif_path in tqdm(tif_files, desc=f"Generating {self.output_modality} from {self.input_modality}"):
+        # Sort for consistency
+        sample_files = sorted(list(self.input_dirs[self.input_modalities[0]].glob("*.tif")))
+        if max_files:
+            sample_files = sample_files[:max_files]
+
+        print(f"Found {len(sample_files)} files to process")
+        print(f"First few files: {[f.name for f in sample_files[:3]]}")
+
+        for tif_path in tqdm(sample_files, desc=f"Generating {self.output_modality} from {self.input_modalities}"):
             self.process_file(tif_path)
 
     def process_file(self, tif_path):
         if self.device == 'cuda':
             torch.cuda.empty_cache()
 
-        arr = rxr.open_rasterio(tif_path).squeeze().values  # shape: [C, H, W]
-        arr = arr.astype(np.float32)
-        if self.input_modality == "S1RTC":
-            # Convert from linear power to dB safely
-            epsilon = 1e-8
-            arr = 10.0 * np.log10(np.clip(arr, epsilon, None))
-            arr = np.clip(arr, -50, 10)  # Optional: match TerraMesh dB range ## CHECK! TODO
-        elif self.input_modality == "S2L2A":
-            # Convert from DN to reflectance
-            # arr = arr / 1000.0 # Rescaling DN-->reflectance for S2L2A input (0-10 range, as expected by TerraMind)
-            # arr = np.clip(arr, 0.0, 1.1)  # Optional: cap reflectance ## CHECK! TODO
-            pass
-        elif self.input_modality == "LULC":
-            # LULC preprocessing - ensure class indices are in 0-9 range
-            print(f"LULC input stats - min: {arr.min()}, max: {arr.max()}, unique: {len(np.unique(arr))}")
-            
-            if arr.ndim == 2:
-                print("LULC input is single-channel, normalizing class indices to 0-9 range")
-                
-                # Get unique classes and map them to 0-9
-                unique_classes = sorted(np.unique(arr))
-                print(f"Original classes: {unique_classes}")
-                
-                # Create a mapping to 0-9 range
-                normalized_arr = np.zeros_like(arr, dtype=np.float32)
-                for i, cls in enumerate(unique_classes[:10]):  # Only take first 10 classes
-                    normalized_arr[arr == cls] = float(i)
-                
-                arr = normalized_arr[None, ...]  # Add channel dimension
-                print(f"Normalized to 0-9 range: {arr.shape}, values: {np.unique(arr)}")
-                
-                # Check if tokenizer expects more channels
-                temp_tensor = torch.tensor(arr).float().unsqueeze(0).to(self.device)
-                
-                if hasattr(self.model, 'tokenizer') and self.input_modality in self.model.tokenizer:
-                    tokenizer = self.model.tokenizer[self.input_modality]
-                    if hasattr(tokenizer, 'encoder') and hasattr(tokenizer.encoder, 'proj'):
-                        expected_channels = tokenizer.encoder.proj.in_channels
-                        print(f"LULC tokenizer expects {expected_channels} input channels, got {temp_tensor.shape[1]}")
-                        
-                        if expected_channels == 10:
-                            # Convert to one-hot encoding
-                            one_hot = torch.zeros(1, 10, arr.shape[1], arr.shape[2], device=self.device)
-                            class_indices = temp_tensor.long()
-                            one_hot.scatter_(1, class_indices, 1.0)
-                            arr = one_hot.squeeze(0).cpu().numpy()  # [10, H, W]
-                            print(f"Converted to one-hot encoding: {arr.shape}")
-        elif self.input_modality == "DEM":
-            # DEM preprocessing if needed
-            pass
+        all_tensors = []
+        for modality in self.input_modalities:
+            arr = self.load_and_preprocess(modality, tif_path)
+            tensor = torch.tensor(arr).float().unsqueeze(0).to(self.device)  # [1, C, H, W]
+            crop = T.CenterCrop(self.crop_size)
+            tensor = crop(tensor)
+            all_tensors.append(tensor)
 
-        # Handle single-band files (expected for LULC and DEM)
-        if arr.ndim == 2:
-            if self.input_modality in ["LULC", "DEM"]:
-                # Single-band is expected - add channel dimension
-                arr = arr[None, ...]  # Add channel dimension: [H, W] -> [1, H, W]
-                print(f"Added channel dimension: {arr.shape}")
-            else:
-                tqdm.write(f"WARNING: {tif_path} is not a multi-band file.")
-                return
+        input_dict = {mod: tensor for mod, tensor in zip(self.input_modalities, all_tensors)}
 
-        img_tensor = torch.tensor(arr).float().unsqueeze(0).to(self.device)  # [1, C, H, W]
-        print(f"Tensor shape before crop: {img_tensor.shape}")
-        
-        # Center crop
-        crop = T.CenterCrop(self.crop_size)
-        img_tensor_cropped = crop(img_tensor)
-        
-        print(f"Final tensor shape: {img_tensor_cropped.shape}")
-        print(f"Tensor stats - min: {img_tensor_cropped.min():.3f}, max: {img_tensor_cropped.max():.3f}")
-
-        # Inference
         with torch.no_grad():
-            generated = self.model(img_tensor_cropped, timesteps=self.timesteps, verbose=False)
+            generated = self.model(input_dict, timesteps=self.timesteps, verbose=False)
 
-        output = generated[self.output_modality].cpu().squeeze().numpy()  # [C, H, W]
+        output = generated[self.output_modality].cpu().squeeze().numpy()
 
-        # Output filename
         tile_name = tif_path.stem
         out_path = self.output_dir / f"{tile_name}.tif"
 
-        # Choose dtype and process data based on output modality
+        # Process output based on modality
         if self.output_modality == "S1RTC":
             # Convert dB back to linear power for output (to match input format and visualization)
-            output = np.clip(output, -50, 10)  # Optional: enforce valid dB range before converting
+            output = np.clip(output, -50, 10)
             output_data = (10 ** (output / 10)).astype(np.float32)
             output_dtype = np.float32
+            
         elif self.output_modality == "S2L2A":
             # S2L2A: uint16 for reflectance values (0-10000 range)
             output_dtype = np.uint16
-            
-            # Debug: Check the actual output range
-            # print(f"Raw S2L2A output - min: {output.min():.4f}, max: {output.max():.4f}, mean: {output.mean():.4f}")
-            
-            # The model outputs values in ~1000-5000 range, which is already reasonable for S2L2A
-            # Just convert to uint16 without additional scaling
             output_data = np.clip(output, 0, 10000).astype(np.uint16)
-                
-            # print(f"Processed S2L2A output - min: {output_data.min()}, max: {output_data.max()}, mean: {output_data.mean():.1f}")
-        
-        elif self.output_modality == "LULC":
-            # LULC: FSQ-VAE tokenized output - already discrete tokens/class indices
-            # The model decoder reconstructs discrete token codes via tokenizer decode logic
-            # No need to round - output should already be quantized class indices
             
+        elif self.output_modality == "LULC":
+            # LULC: discrete class indices as uint8
             print(f"LULC output shape: {output.shape}")
             print(f"LULC output stats - min: {output.min():.2f}, max: {output.max():.2f}, unique values: {len(np.unique(output))}")
             
-            # Check if output is already discrete (integer-like values)
             if np.allclose(output, np.round(output)):
-                # Output is already discrete - just convert to appropriate integer type
                 output_data = np.clip(output, 0, 255).astype(np.uint8)
             else:
-                # If somehow continuous, we might need different handling
-                # Could try nearest neighbor to closest valid token/class
                 output_data = np.round(np.clip(output, 0, 255)).astype(np.uint8)
             
             output_dtype = np.uint8
             
             # Debug: Show class distribution
             unique_classes, counts = np.unique(output_data, return_counts=True)
-            print(f"Generated LULC classes: {unique_classes[:10]}...")  # Show first 10
+            print(f"Generated LULC classes: {unique_classes[:10]}...")
             print(f"Most common class: {unique_classes[np.argmax(counts)]} ({counts.max()} pixels)")
-            print(f"LULC output_data shape after processing: {output_data.shape}")
             
         elif self.output_modality == "DEM":
-            # DEM: typically float32 for elevation values
+            # DEM: float32 for elevation values
             output_dtype = np.float32
             output_data = output.astype(np.float32)
+            
         else:
-            # Default: keep as float32
+            # Default: float32
             output_dtype = np.float32
             output_data = output.astype(np.float32)
 
-        # Save as GeoTIFF using input metadata with specified dtype
         with rasterio.open(tif_path) as src:
             meta = src.meta.copy()
-            
-            # Handle single-band output (DEM) vs multi-band (S1RTC, S2L2A, LULC)
-            if self.output_modality == "DEM":
-                # Single-band output
-                if output_data.ndim == 3 and output_data.shape[0] == 1:
-                    output_data = output_data.squeeze(0)  # Remove channel dimension
-                count = 1
-            else:
-                # Multi-band output (S1RTC, S2L2A, and LULC which has 10 bands)
-                count = output_data.shape[0] if output_data.ndim == 3 else 1
-                print(f"Setting count to {count} for {self.output_modality}")
-            
-            # Fix nodata based on dtype
-            if output_dtype == np.uint8:
-                meta['nodata'] = 255  # Use max value for uint8
-            elif output_dtype == np.uint16:
-                meta['nodata'] = 65535  # Valid nodata for uint16
-            elif output_dtype == np.float32:
-                meta['nodata'] = -9999.0  # Valid nodata for float
-            else:
-                meta.pop('nodata', None)  # Remove if unsure
-                
-            meta.update({
-                'count': count, 
-                'height': output_data.shape[-2], 
-                'width': output_data.shape[-1],
-                'dtype': output_dtype
-            })
+            count = output_data.shape[0] if output_data.ndim == 3 else 1
 
-            with rasterio.open(out_path, 'w', **meta) as dst:
-                if output_data.ndim == 2:
-                    dst.write(output_data, 1)  # Single band
-                else:
-                    dst.write(output_data)  # Multi-band
+        # Fix nodata based on dtype (from your old working code)
+        if output_dtype == np.uint8:
+            nodata_value = 255  # Use max value for uint8
+        elif output_dtype == np.uint16:
+            nodata_value = 65535  # Valid nodata for uint16
+        elif output_dtype == np.float32:
+            nodata_value = -9999.0  # Valid nodata for float
+        else:
+            nodata_value = None  # Remove if unsure
+        
+        meta.update({
+            'count': count,
+            'height': output_data.shape[-2],
+            'width': output_data.shape[-1],
+            'dtype': output_dtype,
+        })
+        
+        # Only set nodata if we have a valid value
+        if nodata_value is not None:
+            meta['nodata'] = nodata_value
+        else:
+            meta.pop('nodata', None)
+        
+        with rasterio.open(out_path, 'w', **meta) as dst:
+            if output_data.ndim == 2:
+                dst.write(output_data, 1)
+            else:
+                dst.write(output_data)
 
 if __name__ == "__main__":
     generator = TerraMindGenerator(
-        input_modality="S1RTC",
+        input_modalities=["S1RTC", "DEM"],
         output_modality="S2L2A",
+        root="/your/path/here"
     )
     generator.process_all()
